@@ -23,6 +23,7 @@ std::map <int, V8Runtime*> v8Isolates;
 JavaVM* jvm = NULL;
 jclass v8cls = NULL;
 jclass stringCls = NULL;
+jmethodID callVoidMethod = NULL;
 
 void throwError( JNIEnv *env, const char *message );
 void throwExecutionException( JNIEnv *env, const char *message );
@@ -112,7 +113,7 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1createIsolate
 		env->GetJavaVM(&jvm);
 		v8cls = (jclass)env->NewGlobalRef((env)->FindClass("com/eclipsesource/v8/V8"));
 		stringCls = (jclass)env->NewGlobalRef((env)->FindClass("java/lang/String"));
-
+		callVoidMethod = (env)->GetMethodID(v8cls, "callVoidJavaMethod", "(ILcom/eclipsesource/v8/V8Array;)V");
 	}
 	v8Isolates[handle] = new V8Runtime();
 	v8Isolates[handle]->isolate = Isolate::New();
@@ -1304,8 +1305,6 @@ void voidCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 	jobject parameters = createParameterArray(env, md->v8RuntimeHandle, v8, size, args);
 
-	jclass cls = (env)->FindClass("com/eclipsesource/v8/V8");
-	jmethodID callVoidMethod = (env)->GetMethodID(cls, "callVoidJavaMethod", "(ILcom/eclipsesource/v8/V8Array;)V");
 
 	env->CallVoidMethod(v8, callVoidMethod, md->methodID, parameters);
 	if ( env -> ExceptionCheck() ) {
@@ -1319,7 +1318,6 @@ void voidCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 	env->DeleteLocalRef(parameters);
 	env->DeleteLocalRef(arrayCls);
-	env->DeleteLocalRef(cls);
 }
 
 int getReturnType(JNIEnv* env, jobject &object) {
