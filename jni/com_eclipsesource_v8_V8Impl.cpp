@@ -24,6 +24,9 @@ JavaVM* jvm = NULL;
 jclass v8cls = NULL;
 jclass stringCls = NULL;
 jmethodID callVoidMethod = NULL;
+jclass v8ArrayCls = NULL;
+jmethodID newArrayMethod = NULL;
+jmethodID getHandleMethod = NULL;
 
 void throwError( JNIEnv *env, const char *message );
 void throwExecutionException( JNIEnv *env, const char *message );
@@ -114,6 +117,10 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1createIsolate
 		v8cls = (jclass)env->NewGlobalRef((env)->FindClass("com/eclipsesource/v8/V8"));
 		stringCls = (jclass)env->NewGlobalRef((env)->FindClass("java/lang/String"));
 		callVoidMethod = (env)->GetMethodID(v8cls, "callVoidJavaMethod", "(ILcom/eclipsesource/v8/V8Array;)V");
+		v8ArrayCls = (jclass)env->NewGlobalRef(env->FindClass("com/eclipsesource/v8/V8Array"));
+		newArrayMethod = env->GetMethodID(v8ArrayCls, "<init>", "(Lcom/eclipsesource/v8/V8;)V");
+		getHandleMethod = env->GetMethodID(v8ArrayCls, "getHandle", "()I");
+
 	}
 	v8Isolates[handle] = new V8Runtime();
 	v8Isolates[handle]->isolate = Isolate::New();
@@ -1278,11 +1285,8 @@ int getArrayHandle(JNIEnv* env, jobject object) {
 
 jobject createParameterArray(JNIEnv* env, int v8RuntimeHandle, jobject v8, int size, const v8::FunctionCallbackInfo<v8::Value>& args) {
 	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
-	jclass cls = env->FindClass("com/eclipsesource/v8/V8Array");
-	jmethodID methodID = env->GetMethodID(cls, "<init>", "(Lcom/eclipsesource/v8/V8;)V");
-	jmethodID getHandle = env->GetMethodID(cls, "getHandle", "()I");
-	jobject result = env->NewObject(cls, methodID, v8);
-	jint parameterHandle = env->CallIntMethod(result, getHandle);
+	jobject result = env->NewObject(v8ArrayCls, newArrayMethod, v8);
+	jint parameterHandle = env->CallIntMethod(result, getHandleMethod);
 
 	Handle<v8::Object> parameters = Local<Object>::New(isolate, *v8Isolates[v8RuntimeHandle]->objects[parameterHandle]);
 
@@ -1290,7 +1294,6 @@ jobject createParameterArray(JNIEnv* env, int v8RuntimeHandle, jobject v8, int s
 		parameters->Set(i, args[i]);
 	}
 
-	env->DeleteLocalRef(cls);
 	return result;
 }
 
