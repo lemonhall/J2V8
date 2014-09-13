@@ -1306,21 +1306,31 @@ void voidCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 	jobject v8 = v8Isolates[md->v8RuntimeHandle]->v8;
 	JNIEnv* env = v8Isolates[md->v8RuntimeHandle]->env;
 
-	jobject parameters = createParameterArray(env, md->v8RuntimeHandle, v8, size, args);
+	Isolate* isolate = getIsolate(env, md->v8RuntimeHandle);
+	jobject paramObject = env->NewObject(v8ArrayCls, newArrayMethod, v8);
+	jint parameterHandle = env->CallIntMethod(paramObject, getHandleMethod);
+
+	Handle<v8::Object> parameters = Local<Object>::New(isolate, *v8Isolates[md->v8RuntimeHandle]->objects[parameterHandle]);
+
+	for ( int i = 0; i < size; i++) {
+		parameters->Set(i, args[i]);
+	}
+
+	//jobject parameters = createParameterArray(env, md->v8RuntimeHandle, v8, size, args);
 
 
-	env->CallVoidMethod(v8, callVoidMethod, md->methodID, parameters);
+	env->CallVoidMethod(v8, callVoidMethod, md->methodID, paramObject);
 	if ( env -> ExceptionCheck() ) {
 		Isolate* isolate = getIsolate(env, md->v8RuntimeHandle);
 		isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Java Exception Caught"));
 	}
 
-	jclass arrayCls = env->FindClass("com/eclipsesource/v8/V8Array");
-	jmethodID release = env->GetMethodID(arrayCls, "release", "()V");
-	env->CallVoidMethod(parameters, release);
+	//jclass arrayCls = env->FindClass("com/eclipsesource/v8/V8Array");
+	jmethodID release = env->GetMethodID(v8ArrayCls, "release", "()V");
+	env->CallVoidMethod(paramObject, release);
 
-	env->DeleteLocalRef(parameters);
-	env->DeleteLocalRef(arrayCls);
+	env->DeleteLocalRef(paramObject);
+	//env->DeleteLocalRef(arrayCls);
 }
 
 int getReturnType(JNIEnv* env, jobject &object) {
