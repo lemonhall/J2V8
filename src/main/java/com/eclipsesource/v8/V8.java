@@ -15,16 +15,20 @@ public class V8 extends V8Object {
     private static Runnable debugHandler           = null;
 
     private int             methodReferenceCounter = 0;
-    private int             v8RuntimeHandle;
+    int                     v8RuntimeHandle;
     private boolean         debugEnabled           = false;
     long                    objectReferences       = 0;
 
     class MethodDescriptor {
         Object object;
         Method method;
+        ArgumentMapper argumentMapper;
+        JavaCallback   callback;
+        int            param;
+        public V8Array parameters;
     }
 
-    Map<Integer, MethodDescriptor> functions = new HashMap<>();
+    static Map<Integer, MethodDescriptor> functions = new HashMap<>();
 
     static {
         System.loadLibrary("j2v8"); // Load native library at runtime
@@ -173,19 +177,35 @@ public class V8 extends V8Object {
     }
 
     static void checkThread() {
-        if ((thread != null) && (thread != Thread.currentThread())) {
-            throw new Error("Invalid V8 thread access.");
-        }
+        // if ((thread != null) && (thread != Thread.currentThread())) {
+        // throw new Error("Invalid V8 thread access.");
+        // }
     }
 
-    void registerCallback(final Object object, final Method method, final int methodType, final int objectHandle,
+    void registerCallback(final Object object, final JavaCallback callback, final int objectHandle,
             final String jsFunctionName) {
         MethodDescriptor methodDescriptor = new MethodDescriptor();
         methodDescriptor.object = object;
+        methodDescriptor.callback = callback;
+        methodDescriptor.parameters = new V8Array(v8);
+        int methodID = methodReferenceCounter++;
+
+        functions.put(methodID, methodDescriptor);
+        _registerJavaMethod(getV8RuntimeHandle(), objectHandle, jsFunctionName, methodID, true,
+                methodDescriptor.parameters);
+    }
+
+    void registerCallback(final Object object, final Method method, final int methodType, final int objectHandle,
+            final String jsFunctionName, final ArgumentMapper argumentMapper) {
+        MethodDescriptor methodDescriptor = new MethodDescriptor();
+        methodDescriptor.object = object;
         methodDescriptor.method = method;
+        methodDescriptor.argumentMapper = argumentMapper;
+        methodDescriptor.parameters = new V8Array(v8);
         int methodID = methodReferenceCounter++;
         functions.put(methodID, methodDescriptor);
-        _registerJavaMethod(getV8RuntimeHandle(), objectHandle, jsFunctionName, methodID, voidMethod(method));
+        _registerJavaMethod(getV8RuntimeHandle(), objectHandle, jsFunctionName, methodID, voidMethod(method),
+                methodDescriptor.parameters);
     }
 
     private boolean voidMethod(final Method method) {
@@ -196,7 +216,7 @@ public class V8 extends V8Object {
         return false;
     }
 
-    private Object getDefaultValue(final Class<?> type) {
+    static private Object getDefaultValue(final Class<?> type) {
         if (type.equals(Integer.TYPE) || type.equals(Integer.class)) {
             return 0;
         } else if (type.equals(Double.TYPE) || type.equals(Double.class)) {
@@ -213,7 +233,7 @@ public class V8 extends V8Object {
         Object[] args = getArgs(methodDescriptor, parameters);
         try {
             Object result = methodDescriptor.method.invoke(methodDescriptor.object, args);
-            return checkResult(result);
+            return checkResult(methodDescriptor.argumentMapper.map(result, 0));
         } catch (InvocationTargetException e) {
             throw e.getTargetException();
         } catch (IllegalAccessException | IllegalArgumentException e) {
@@ -234,9 +254,13 @@ public class V8 extends V8Object {
         throw new V8ExecutionException("Unknown return type: " + result.getClass());
     }
 
-    protected void callVoidJavaMethod(final int methodID, final V8Array parameters) throws Throwable {
+    static protected void callVoidJavaMethod(final int methodID) throws Throwable {
         MethodDescriptor methodDescriptor = functions.get(methodID);
-        Object[] args = getArgs(methodDescriptor, parameters);
+        if (methodDescriptor.callback != null) {
+            methodDescriptor.callback.callback(methodDescriptor.parameters);
+            return;
+        }
+        Object[] args = getArgs(methodDescriptor, methodDescriptor.parameters);
         try {
             methodDescriptor.method.invoke(methodDescriptor.object, args);
         } catch (InvocationTargetException e) {
@@ -248,7 +272,7 @@ public class V8 extends V8Object {
         }
     }
 
-    private void releaseArguments(final Object[] args) {
+    static private void releaseArguments(final Object[] args) {
         for (Object arg : args) {
             if (arg instanceof V8Array) {
                 ((V8Array) arg).release();
@@ -258,39 +282,40 @@ public class V8 extends V8Object {
         }
     }
 
-    private Object[] getArgs(final MethodDescriptor methodDescriptor, final V8Array parameters) {
+    static private Object[] getArgs(final MethodDescriptor methodDescriptor, final V8Array parameters) {
         boolean hasVarArgs = methodDescriptor.method.isVarArgs();
         int numberOfParameters = methodDescriptor.method.getParameterTypes().length;
         int varArgIndex = hasVarArgs ? numberOfParameters-1 : numberOfParameters;
         Object[] args = setDefaultValues(new Object[numberOfParameters], methodDescriptor.method.getParameterTypes());
-        List<Object> varArgs = populateParamters(parameters, varArgIndex, args);
+        List<Object> varArgs = populateParamters(parameters, varArgIndex, args, methodDescriptor.argumentMapper);
         if (hasVarArgs) {
             args[varArgIndex] = varArgs.toArray();
         }
         return args;
     }
 
-    private List<Object> populateParamters(final V8Array parameters, final int varArgIndex, final Object[] args) {
+    static private List<Object> populateParamters(final V8Array parameters, final int varArgIndex, final Object[] args,
+            final ArgumentMapper mapper) {
         List<Object> varArgs = new ArrayList<>();
         for (int i = 0; i < parameters.length(); i++) {
             if ( i >= varArgIndex ) {
-                varArgs.add(getArrayItem(parameters, i));
+                varArgs.add(mapper.map(getArrayItem(parameters, i), varArgIndex + 1));
             }
             else {
-                args[i] = getArrayItem(parameters, i);
+                args[i] = mapper.map(getArrayItem(parameters, i), i + 1);
             }
         }
         return varArgs;
     }
 
-    private Object[] setDefaultValues(final Object[] parameters, final Class<?>[] parameterTypes) {
+    static private Object[] setDefaultValues(final Object[] parameters, final Class<?>[] parameterTypes) {
         for (int i = 0; i < parameters.length; i++) {
             parameters[i] = getDefaultValue(parameterTypes[i]);
         }
         return parameters;
     }
 
-    private Object getArrayItem(final V8Array array, final int index) {
+    static private Object getArrayItem(final V8Array array, final int index) {
         try {
             int type = array.getType(index);
             switch (type) {
@@ -363,7 +388,7 @@ public class V8 extends V8Object {
 
     protected native String _getString(int v8RuntimeHandle, int objectHandle, final String key);
 
-    protected native void _getArray(int v8RuntimeHandle, int objectHandle, String key, int resultHandle);
+    protected native void _getArray(int v8RuntimeHandle, int objectHandle, String key, int resultHandle, V8Array result);
 
     protected native void _getObject(int v8RuntimeHandle, final int objectHandle, final String key,
             final int resultObjectHandle);
@@ -411,6 +436,9 @@ public class V8 extends V8Object {
     protected native void _registerJavaMethod(int v8RuntimeHandle, final int objectHandle, final String functionName,
             final int methodID, final boolean voidMethod);
 
+    protected native void _registerJavaMethod(int v8RuntimeHandle, final int objectHandle, final String functionName,
+            final int methodID, final boolean voidMethod, final V8Array parameters);
+
     protected native void _initNewV8Array(int v8RuntimeHandle, int arrayHandle);
 
     protected native void _releaseArray(int v8RuntimeHandle, int arrayHandle);
@@ -428,7 +456,8 @@ public class V8 extends V8Object {
     protected native void _arrayGetObject(final int v8RuntimeHandle, final int arrayHandle, final int index,
             final int resultHandle);
 
-    protected native void _arrayGetArray(int v8RuntimeHandle, int arrayHandle, int index, int resultHandle);
+    protected native void _arrayGetArray(int v8RuntimeHandle, int arrayHandle, int index, int resultHandle,
+            V8Array result);
 
     protected native void _addArrayIntItem(int v8RuntimeHandle, int arrayHandle, int value);
 
@@ -464,4 +493,5 @@ public class V8 extends V8Object {
         objectReferences--;
     }
 
+    public native double[] _arrayGetDoubles(int v8RuntimeHandle2, int handle, int start, int length);
 }

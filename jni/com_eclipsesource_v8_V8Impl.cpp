@@ -19,6 +19,7 @@ public:
     jobject v8;
 };
 
+std::map<String::Utf8Value, jstring> strPool;
 std::map <int, V8Runtime*> v8Isolates;
 JavaVM* jvm = NULL;
 jclass v8cls = NULL;
@@ -27,6 +28,9 @@ jmethodID callVoidMethod = NULL;
 jclass v8ArrayCls = NULL;
 jmethodID newArrayMethod = NULL;
 jmethodID getHandleMethod = NULL;
+jmethodID releaseMethod = NULL;
+jfieldID fid = NULL;
+jfieldID firstString = NULL;
 
 void throwError( JNIEnv *env, const char *message );
 void throwExecutionException( JNIEnv *env, const char *message );
@@ -116,10 +120,15 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1createIsolate
 		env->GetJavaVM(&jvm);
 		v8cls = (jclass)env->NewGlobalRef((env)->FindClass("com/eclipsesource/v8/V8"));
 		stringCls = (jclass)env->NewGlobalRef((env)->FindClass("java/lang/String"));
-		callVoidMethod = (env)->GetMethodID(v8cls, "callVoidJavaMethod", "(ILcom/eclipsesource/v8/V8Array;)V");
+		callVoidMethod = (env)->GetStaticMethodID(v8cls, "callVoidJavaMethod", "(I)V");
 		v8ArrayCls = (jclass)env->NewGlobalRef(env->FindClass("com/eclipsesource/v8/V8Array"));
 		newArrayMethod = env->GetMethodID(v8ArrayCls, "<init>", "(Lcom/eclipsesource/v8/V8;)V");
 		getHandleMethod = env->GetMethodID(v8ArrayCls, "getHandle", "()I");
+		releaseMethod = env->GetMethodID(v8ArrayCls, "release", "()V");
+		fid = (env)->GetFieldID(v8ArrayCls,"length","I");
+		firstString = (env)->GetFieldID(v8ArrayCls,"firstString","Ljava/lang/String;");
+
+
 
 	}
 	v8Isolates[handle] = new V8Runtime();
@@ -185,7 +194,7 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1getObject
 }
 
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1getArray
-  (JNIEnv *env, jobject, jint v8RuntimeHandle, jint parentHandle, jstring objectKey, jint resultHandle) {
+  (JNIEnv *env, jobject, jint v8RuntimeHandle, jint parentHandle, jstring objectKey, jint resultHandle, jobject result) {
 	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
 	if ( isolate == NULL ) {
 		return;
@@ -732,8 +741,8 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1executeVoidFunction
 	setupJNIContext(v8RuntimeHandle, env, v8);
 	const char* functionName = env -> GetStringUTFChars(jfunctionName, NULL);
 	HandleScope handle_scope(isolate);
-	v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
-	Context::Scope context_scope(context);
+//	v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
+//	Context::Scope context_scope(context);
 	Handle<v8::Object> parentObject = Local<Object>::New(isolate, *v8Isolates[v8RuntimeHandle]->objects[objectHandle]);
 	int size = 0;
 	Handle<Value>* args = NULL;
@@ -1030,8 +1039,41 @@ JNIEXPORT jstring JNICALL Java_com_eclipsesource_v8_V8__1arrayGetString
 		throwResultUndefinedException(env, "");
 		return 0;
 	}
+
 	String::Utf8Value utf(v8Value->ToString());
+
+	//if ( v8Isolates.find(handle) == v8Isolates.end() ) {
+//
+//	if ( strPool.find( utf ) == strPool.end() ) {
+//		strPool[utf] = env->NewStringUTF(*utf);
+//	}
+//	return strPool[utf];
 	return env->NewStringUTF(*utf);
+}
+
+JNIEXPORT jdoubleArray JNICALL Java_com_eclipsesource_v8_V8__1arrayGetDoubles
+  (JNIEnv *env, jobject, jint v8RuntimeHandle, jint arrayHandle, jint start, jint length) {
+	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
+	if ( isolate == NULL ) {
+		return NULL;
+	}
+	HandleScope handle_scope(isolate);
+	v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
+	Context::Scope context_scope(context);
+	Handle<v8::Object> array = Local<Object>::New(isolate, *v8Isolates[v8RuntimeHandle]->objects[arrayHandle]);
+
+	jdoubleArray result = env->NewDoubleArray(length);
+	jdouble fill[length];
+	for (int i = start; i < start+length; i++) {
+		Handle<Value> v8Value = array->Get(i);
+		if (v8Value.IsEmpty() || v8Value->IsUndefined() || !v8Value->IsNumber()) {
+				throwResultUndefinedException(env, "");
+				return NULL;
+		}
+		fill[i-start] = v8Value->NumberValue();
+	}
+	(env)->SetDoubleArrayRegion(result, 0, length, fill);
+	return result;
 }
 
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetObject
@@ -1055,14 +1097,14 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetObject
 }
 
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetArray
-(JNIEnv *env, jobject, jint v8RuntimeHandle, jint arrayHandle, jint index, jint resultHandle) {
+(JNIEnv *env, jobject, jint v8RuntimeHandle, jint arrayHandle, jint index, jint resultHandle, jobject result) {
 	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
 	if ( isolate == NULL ) {
 		return;
 	}
 	HandleScope handle_scope(isolate);
-	v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
-	Context::Scope context_scope(context);
+//	v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
+//	Context::Scope context_scope(context);
 	Handle<v8::Object> array = Local<Object>::New(isolate, *v8Isolates[v8RuntimeHandle]->objects[arrayHandle]);
 	Handle<Value> v8Value = array->Get(index);
 
@@ -1070,7 +1112,18 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetArray
 		throwResultUndefinedException(env, "");
 		return;
 	}
-	v8Isolates[v8RuntimeHandle]->objects[resultHandle]->Reset(v8Isolates[v8RuntimeHandle]->isolate, v8Value->ToObject());
+	Handle<Object> resultObject = v8Value->ToObject();
+	int sizeOfArray = Array::Cast(*resultObject)->Length();
+	env->SetIntField(result, fid, sizeOfArray);
+	if ( sizeOfArray > 0 ) {
+		Handle<Value> firstValue = Array::Cast(*resultObject)->Get(0);
+//		if ( firstValue->IsString() ) {
+//			String::Utf8Value utf(firstValue->ToString());
+//			jstring s = env->NewStringUTF(*utf);
+//			env->SetObjectField(result, firstString, s);
+//		}
+	}
+	v8Isolates[v8RuntimeHandle]->objects[resultHandle]->Reset(v8Isolates[v8RuntimeHandle]->isolate, resultObject);
 }
 
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1addArrayUndefinedItem
@@ -1251,6 +1304,8 @@ class MethodDescriptor {
 public:
 	int methodID;
 	int v8RuntimeHandle;
+	jobject paramObject;
+	int parameterHandle;
 };
 
 void release(JNIEnv* env, jobject object) {
@@ -1297,6 +1352,7 @@ jobject createParameterArray(JNIEnv* env, int v8RuntimeHandle, jobject v8, int s
 	return result;
 }
 
+int counter=0;
 void voidCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 	int size = args.Length();
 	Local<External> data = Local<External>::Cast(args.Data());
@@ -1305,31 +1361,55 @@ void voidCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 	jobject v8 = v8Isolates[md->v8RuntimeHandle]->v8;
 	JNIEnv* env = v8Isolates[md->v8RuntimeHandle]->env;
+//	Local<Value> v = args[0];
+//	Local<String> s1 = v->ToString();
+//	if ( s1->Length() > 2 && md->methodID  == 5) {
+//		//jmethodID release = env->GetMethodID(v8ArrayCls, "release", "()V");
+//			//env->CallVoidMethod(paramObject, release);
+//
+//			//env->DeleteLocalRef(paramObject);
+//		return;
+//	}
+
 
 	Isolate* isolate = getIsolate(env, md->v8RuntimeHandle);
-	jobject paramObject = env->NewObject(v8ArrayCls, newArrayMethod, v8);
-	jint parameterHandle = env->CallIntMethod(paramObject, getHandleMethod);
 
-	Handle<v8::Object> parameters = Local<Object>::New(isolate, *v8Isolates[md->v8RuntimeHandle]->objects[parameterHandle]);
+	Local<Array> array = Array::New(isolate);
+	delete(v8Isolates[md->v8RuntimeHandle]->objects[md -> parameterHandle]);
+	v8Isolates[md->v8RuntimeHandle]->objects.erase(md -> parameterHandle);
+	v8Isolates[md->v8RuntimeHandle]->objects[md -> parameterHandle] = new Persistent<Object>;
+	v8Isolates[md->v8RuntimeHandle]->objects[md -> parameterHandle]->Reset(v8Isolates[md->v8RuntimeHandle]->isolate, array);
 
+	Handle<v8::Object> parameters = Local<Object>::New(isolate, *v8Isolates[md->v8RuntimeHandle]->objects[md -> parameterHandle]);
+
+	//Local<v8::String> s = v ->ToString();
+	//cout << size << endl;
 	for ( int i = 0; i < size; i++) {
 		parameters->Set(i, args[i]);
 	}
 
 	//jobject parameters = createParameterArray(env, md->v8RuntimeHandle, v8, size, args);
 
+//
+//		if ( s1->Length() > 3 && md->methodID  == 5) {
+//			//jmethodID release = env->GetMethodID(v8ArrayCls, "release", "()V");
+//				//env->CallVoidMethod(paramObject, release);
+//
+//				//env->DeleteLocalRef(paramObject);
+//			return;
+//		}
 
-	env->CallVoidMethod(v8, callVoidMethod, md->methodID, paramObject);
+
+	env->CallStaticVoidMethod(v8cls, callVoidMethod, md->methodID);
 	if ( env -> ExceptionCheck() ) {
 		Isolate* isolate = getIsolate(env, md->v8RuntimeHandle);
 		isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Java Exception Caught"));
 	}
 
 	//jclass arrayCls = env->FindClass("com/eclipsesource/v8/V8Array");
-	jmethodID release = env->GetMethodID(v8ArrayCls, "release", "()V");
-	env->CallVoidMethod(paramObject, release);
+	//env->CallVoidMethod(paramObject, releaseMethod);
 
-	env->DeleteLocalRef(paramObject);
+	//env->DeleteLocalRef(paramObject);
 	//env->DeleteLocalRef(arrayCls);
 }
 
@@ -1444,8 +1524,34 @@ void unknownCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 	env->DeleteLocalRef(cls);
 }
 
-JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod
-  (JNIEnv *env, jobject, jint v8RuntimeHandle, jint objectHandle, jstring functionName, jint methodID, jboolean voidMethod) {
+JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod__IILjava_lang_String_2IZLcom_eclipsesource_v8_V8Array_2
+  (JNIEnv *env, jobject v8, jint v8RuntimeHandle, jint objectHandle, jstring functionName, jint methodID, jboolean voidMethod, jobject param) {
+	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
+		if ( isolate == NULL ) {
+			return;
+		}
+		FunctionCallback callback = voidCallback;
+		if ( voidMethod ) {
+			callback = voidCallback;
+		} else {
+			callback = unknownCallback;
+		}
+
+		HandleScope handle_scope(isolate);
+		v8::Local<v8::Context> context = v8::Local<v8::Context>::New(isolate,v8Isolates[v8RuntimeHandle]->context_);
+		Context::Scope context_scope(context);
+		Handle<v8::Object> global = Local<Object>::New(isolate, *v8Isolates[v8RuntimeHandle]->objects[objectHandle]);
+		const char* utf_string = env -> GetStringUTFChars(functionName, NULL);
+		MethodDescriptor* md = new MethodDescriptor();
+		md ->  methodID = methodID;
+		md -> v8RuntimeHandle = v8RuntimeHandle;
+		md -> paramObject = param;
+		md -> parameterHandle = env->CallIntMethod(md -> paramObject, getHandleMethod);
+		global->Set(String::NewFromUtf8(isolate, utf_string), Function::New(isolate, callback, External::New(isolate, md)));
+}
+
+JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod__IILjava_lang_String_2IZ
+  (JNIEnv *env, jobject v8, jint v8RuntimeHandle, jint objectHandle, jstring functionName, jint methodID, jboolean voidMethod) {
 	Isolate* isolate = getIsolate(env, v8RuntimeHandle);
 	if ( isolate == NULL ) {
 		return;
@@ -1465,6 +1571,8 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod
 	MethodDescriptor* md = new MethodDescriptor();
 	md ->  methodID = methodID;
 	md -> v8RuntimeHandle = v8RuntimeHandle;
+	md -> paramObject = env->NewGlobalRef(env->NewObject(v8ArrayCls, newArrayMethod, v8));
+	md -> parameterHandle = env->CallIntMethod(md -> paramObject, getHandleMethod);
 	global->Set(String::NewFromUtf8(isolate, utf_string), Function::New(isolate, callback, External::New(isolate, md)));
 }
 

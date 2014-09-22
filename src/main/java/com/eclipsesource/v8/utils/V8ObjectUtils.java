@@ -9,8 +9,21 @@ import java.util.Map.Entry;
 import com.eclipsesource.v8.V8;
 import com.eclipsesource.v8.V8Array;
 import com.eclipsesource.v8.V8Object;
+import com.eclipsesource.v8.V8ResultUndefined;
 
 public class V8ObjectUtils {
+
+    public static int[] getIntArray(final V8Array object) {
+        int[] result = new int[object.length()];
+        for (int i = 0; i < result.length; i++) {
+                try {
+                    result[i] = object.getInteger(i);
+                } catch (V8ResultUndefined e) {
+                    System.out.println("Index : " + i + " is not an Integer, it's a: " + object.getType(i));
+                }
+        }
+        return result;
+    }
 
     public static Map<String, ? super Object> toMap(final V8Object object) {
         Map<String, ? super Object> result = new HashMap<>();
@@ -24,7 +37,7 @@ public class V8ObjectUtils {
     public static List<? super Object> toList(final V8Array array) {
         List<? super Object> result = new ArrayList<>();
         for (int i = 0; i < array.length(); i++) {
-            result.add(getValue(array, "" + i));
+            result.add(getValue(array, i));
         }
         return result;
     }
@@ -83,6 +96,38 @@ public class V8ObjectUtils {
             array.release();
         } else {
             throw new IllegalStateException("Unsupported Object of type: " + value.getClass());
+        }
+    }
+
+    private static Object getValue(final V8Array object, final int index) {
+        int valueType = object.getType(index);
+        switch (valueType) {
+            case V8Object.INTEGER:
+                return object.getInteger(index);
+            case V8Object.DOUBLE:
+                return object.getDouble(index);
+            case V8Object.BOOLEAN:
+                return object.getBoolean(index);
+            case V8Object.STRING:
+                return object.getString(index);
+            case V8Object.V8_ARRAY:
+                V8Array array = object.getArray(index);
+                try {
+                    return toList(array);
+                } finally {
+                    array.release();
+                }
+            case V8Object.V8_OBJECT:
+                V8Object child = object.getObject(index);
+                try {
+                    return toMap(child);
+                } finally {
+                    child.release();
+                }
+            case V8Object.VOID:
+                return null;
+            default:
+                throw new IllegalStateException("Cannot find type for index: " + index);
         }
     }
 

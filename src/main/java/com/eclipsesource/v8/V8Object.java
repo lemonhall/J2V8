@@ -12,13 +12,48 @@ public class V8Object {
     public static final int STRING                  = 4;
     public static final int V8_ARRAY                = 5;
     public static final int V8_OBJECT               = 6;
-    public static final int UNKNOWN                 = 7;
 
     private static int      v8ObjectInstanceCounter = 1;
 
     protected V8            v8;
-    private int             objectHandle;
-    private boolean         released;
+    int                     objectHandle;
+    boolean                 released;
+
+    static V8Array          pool[]                  = null;
+    static int              head                    = 0;
+
+    static V8Array createArray(final V8 v8) {
+        if (pool == null) {
+            pool = new V8Array[10];
+            for (int i = 0; i < 10; i++) {
+                V8Array v8Array = new V8Array(v8);
+                v8Array.released = true;
+                // v8._release(v8.getV8RuntimeHandle(), v8Array.getHandle());
+                v8.releaseObjRef();
+                pool[i] = v8Array;
+            }
+            head = 9;
+        }
+        V8Array v8Array = pool[head];
+        head--;
+        v8Array.firstString = null;
+        if (v8Array.length >= 0) {
+            v8Array.length = -1;
+        }
+        // v8Array.initialize(v8.getV8RuntimeHandle(), v8Array.getHandle());
+        v8.addObjRef();
+        return v8Array;
+    }
+
+    static void addBack(final V8Array a) {
+        if (pool != null) {
+            if (head >= 9) {
+                return;
+            }
+            head++;
+            pool[head] = a;
+        }
+    }
 
     protected V8Object() {
         v8 = (V8) this;
@@ -28,7 +63,7 @@ public class V8Object {
 
     public V8Object(final V8 v8) {
         this.v8 = v8;
-        V8.checkThread();
+        // V8.checkThread();
         objectHandle = v8ObjectInstanceCounter++;
         initialize(v8.getV8RuntimeHandle(), objectHandle);
         this.v8.addObjRef();
@@ -44,10 +79,13 @@ public class V8Object {
     }
 
     public void release() {
-        V8.checkThread();
+        // V8.checkThread();
         released = true;
         v8._release(v8.getV8RuntimeHandle(), objectHandle);
         v8.releaseObjRef();
+        if (this instanceof V8Array) {
+            addBack((V8Array) this);
+        }
     }
 
     @Override
@@ -60,6 +98,7 @@ public class V8Object {
 
     @Override
     public int hashCode() {
+        // V8.checkThread();
         return v8._identityHash(v8.getV8RuntimeHandle(), getHandle());
     }
 
@@ -68,45 +107,46 @@ public class V8Object {
     }
 
     public boolean contains(final String key) {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._contains(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public String[] getKeys() {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getKeys(v8.getV8RuntimeHandle(), objectHandle);
     }
 
     public int getType(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getType(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public int getInteger(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getInteger(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public boolean getBoolean(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getBoolean(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public double getDouble(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getDouble(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public String getString(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         return v8._getString(v8.getV8RuntimeHandle(), objectHandle, key);
     }
 
     public V8Array getArray(final String key) throws V8ResultUndefined {
-        V8.checkThread();
-        V8Array result = new V8Array(v8);
+        // V8.checkThread();
+        // V8Array result = new V8Array(v8);
+        V8Array result = createArray(v8);
         try {
-            v8._getArray(v8.getV8RuntimeHandle(), getHandle(), key, result.getHandle());
+            v8._getArray(v8.getV8RuntimeHandle(), getHandle(), key, result.getHandle(), result);
         } catch (Exception e) {
             result.release();
             throw e;
@@ -115,7 +155,7 @@ public class V8Object {
     }
 
     public V8Object getObject(final String key) throws V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         V8Object result = new V8Object(v8);
         try {
             v8._getObject(v8.getV8RuntimeHandle(), objectHandle, key, result.getHandle());
@@ -133,7 +173,7 @@ public class V8Object {
 
     public int executeIntFunction(final String name, final V8Array parameters) throws V8ExecutionException,
     V8ResultUndefined {
-        V8.checkThread();
+        // V8.checkThread();
         int parametersHandle = parameters == null ? -1 : parameters.getHandle();
         return v8._executeIntFunction(v8.getV8RuntimeHandle(), getHandle(), name, parametersHandle);
     }
@@ -243,11 +283,22 @@ public class V8Object {
 
     public V8Object registerJavaMethod(final Object object, final String methodName, final String jsFunctionName,
             final Class<?>[] parameterTypes) {
+        return registerJavaMethod(object, methodName, jsFunctionName, parameterTypes, null);
+    }
+
+    public V8Object registerJavaMethod(final Object object, final JavaCallback callback, final String jsFunctionName) {
+        v8.registerCallback(object, callback, getHandle(), jsFunctionName);
+        return this;
+    }
+
+    public V8Object registerJavaMethod(final Object object, final String methodName, final String jsFunctionName,
+            final Class<?>[] parameterTypes, ArgumentMapper argumentMapper) {
         V8.checkThread();
+        argumentMapper = argumentMapper == null ? ArgumentMapper.IdentityArgumentMapper : argumentMapper;
         try {
             Method method = object.getClass().getMethod(methodName, parameterTypes);
             method.setAccessible(true);
-            v8.registerCallback(object, method, 0, getHandle(), jsFunctionName);
+            v8.registerCallback(object, method, 0, getHandle(), jsFunctionName, argumentMapper);
         } catch (NoSuchMethodException e) {
             throw new IllegalStateException(e);
         } catch (SecurityException e) {

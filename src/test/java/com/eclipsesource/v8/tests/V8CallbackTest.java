@@ -1,6 +1,8 @@
 package com.eclipsesource.v8.tests;
 
 import java.awt.Rectangle;
+import java.util.List;
+import java.util.Map;
 
 import org.junit.After;
 import org.junit.Before;
@@ -8,15 +10,16 @@ import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
+import com.eclipsesource.v8.ArgumentMapper;
 import com.eclipsesource.v8.V8;
 import com.eclipsesource.v8.V8Array;
 import com.eclipsesource.v8.V8ExecutionException;
 import com.eclipsesource.v8.V8Object;
+import com.eclipsesource.v8.utils.V8ObjectUtils;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
@@ -91,6 +94,10 @@ public class V8CallbackTest {
         public void voidMethodVarArgs(final Object... args);
 
         public void voidMethodVarArgsAndOthers(int x, int y, final Object... args);
+
+        public Rectangle rectangleMethod();
+
+        public void voidMethodWithMapAndList(Map<String, Object> map, List<Object> list);
 
     }
 
@@ -958,6 +965,16 @@ public class V8CallbackTest {
         v8.executeVoidScript("foo()");
     }
 
+    public void testObjectMethodReturnsNull() {
+        ICallback callback = mock(ICallback.class);
+        doReturn(null).when(callback).objectMethodNoParameter();
+        v8.registerJavaMethod(callback, "objectMethodNoParameter", "foo", new Class<?>[] {});
+
+        boolean result = v8.executeBooleanScript("typeof foo() === 'undefined';");
+
+        assertTrue(result);
+    }
+
     @Test
     public void testVarArgParametersString() {
         ICallback callback = mock(ICallback.class);
@@ -1042,6 +1059,84 @@ public class V8CallbackTest {
         v8.executeVoidScript("foo()");
 
         verify(callback).voidMethodWithObjectParameters(0);
+    }
+
+    @Test
+    public void testMappingReturnTypeV8Object() {
+        ICallback callback = mock(ICallback.class);
+        doReturn(new Rectangle(1, 2, 3, 4)).when(callback).rectangleMethod();
+        ArgumentMapper mapper = new ArgumentMapper() {
+
+            @Override
+            public Object map(final Object argument, final int index) {
+                if (index == 0) {
+                    Rectangle rect = (Rectangle) argument;
+                    return new V8Object(v8).add("x", rect.getX()).add("y", rect.getY()).add("width", rect.getWidth())
+                            .add("height", rect.getHeight());
+                }
+                return null;
+            }
+        };
+        v8.registerJavaMethod(callback, "rectangleMethod", "foo", new Class<?>[] {}, mapper);
+
+        V8Object result = v8.executeObjectScript("foo()");
+
+        assertEquals(1, result.getInteger("x"));
+        assertEquals(2, result.getInteger("y"));
+        assertEquals(3, result.getInteger("width"));
+        assertEquals(4, result.getInteger("height"));
+        result.release();
+    }
+
+    @Test
+    public void testMappingReturnTypeV8Array() {
+        ICallback callback = mock(ICallback.class);
+        doReturn(new Rectangle(1, 2, 3, 4)).when(callback).rectangleMethod();
+        ArgumentMapper mapper = new ArgumentMapper() {
+
+            @Override
+            public Object map(final Object argument, final int index) {
+                if (index == 0) {
+                    Rectangle rect = (Rectangle) argument;
+                    return new V8Array(v8).push(rect.getX()).push(rect.getY()).push(rect.getWidth())
+                            .push(rect.getHeight());
+                }
+                return null;
+            }
+        };
+        v8.registerJavaMethod(callback, "rectangleMethod", "foo", new Class<?>[] {}, mapper);
+
+        V8Array result = v8.executeArrayScript("foo()");
+
+        assertEquals(1, result.getInteger(0));
+        assertEquals(2, result.getInteger(1));
+        assertEquals(3, result.getInteger(2));
+        assertEquals(4, result.getInteger(3));
+        result.release();
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testMappingParameters() {
+        ICallback callback = mock(ICallback.class);
+        ArgumentMapper mapper = new ArgumentMapper() {
+
+            @SuppressWarnings("unchecked")
+            @Override
+            public Object map(final Object argument, final int index) {
+                if (argument instanceof V8Object) {
+                    return V8ObjectUtils.toMap((V8Object) argument);
+                } else if (argument instanceof V8Array) {
+                    return V8ObjectUtils.toList((V8Array) argument);
+                }
+                return null;
+            }
+        };
+        v8.registerJavaMethod(callback, "voidMethodWithMapAndList", "foo", new Class<?>[] { Map.class, List.class }, mapper);
+
+        v8.executeVoidScript("foo();");
+
+        verify(callback).voidMethodWithMapAndList(any(Map.class), any(List.class));
     }
 
 }

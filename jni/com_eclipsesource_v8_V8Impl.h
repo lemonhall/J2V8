@@ -170,10 +170,10 @@ JNIEXPORT jstring JNICALL Java_com_eclipsesource_v8_V8__1getString
 /*
  * Class:     com_eclipsesource_v8_V8
  * Method:    _getArray
- * Signature: (IILjava/lang/String;I)V
+ * Signature: (IILjava/lang/String;ILcom/eclipsesource/v8/V8Array;)V
  */
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1getArray
-  (JNIEnv *, jobject, jint, jint, jstring, jint);
+  (JNIEnv *, jobject, jint, jint, jstring, jint, jobject);
 
 /*
  * Class:     com_eclipsesource_v8_V8
@@ -332,8 +332,16 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1addUndefined
  * Method:    _registerJavaMethod
  * Signature: (IILjava/lang/String;IZ)V
  */
-JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod
+JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod__IILjava_lang_String_2IZ
   (JNIEnv *, jobject, jint, jint, jstring, jint, jboolean);
+
+/*
+ * Class:     com_eclipsesource_v8_V8
+ * Method:    _registerJavaMethod
+ * Signature: (IILjava/lang/String;IZLcom/eclipsesource/v8/V8Array;)V
+ */
+JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1registerJavaMethod__IILjava_lang_String_2IZLcom_eclipsesource_v8_V8Array_2
+  (JNIEnv *, jobject, jint, jint, jstring, jint, jboolean, jobject);
 
 /*
  * Class:     com_eclipsesource_v8_V8
@@ -402,10 +410,10 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetObject
 /*
  * Class:     com_eclipsesource_v8_V8
  * Method:    _arrayGetArray
- * Signature: (IIII)V
+ * Signature: (IIIILcom/eclipsesource/v8/V8Array;)V
  */
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1arrayGetArray
-  (JNIEnv *, jobject, jint, jint, jint, jint);
+  (JNIEnv *, jobject, jint, jint, jint, jint, jobject);
 
 /*
  * Class:     com_eclipsesource_v8_V8
@@ -510,6 +518,14 @@ JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1disableDebugSupport
  */
 JNIEXPORT void JNICALL Java_com_eclipsesource_v8_V8__1processDebugMessages
   (JNIEnv *, jobject, jint);
+
+/*
+ * Class:     com_eclipsesource_v8_V8
+ * Method:    _arrayGetDoubles
+ * Signature: (IIII)[D
+ */
+JNIEXPORT jdoubleArray JNICALL Java_com_eclipsesource_v8_V8__1arrayGetDoubles
+  (JNIEnv *, jobject, jint, jint, jint, jint);
 
 #ifdef __cplusplus
 }
